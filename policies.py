@@ -24,9 +24,16 @@ class Policy:
         pass
 
 class PGPolicy(Policy):
-    def __init__(self, scenario: Scenario, horizon: int,
+    def __init__(self, scenario: Scenario, horizon: int, nsamples: int,
                  pi_net_sizes: List[int], pi_net_cov: np.ndarray):
         super().__init__(scenario, horizon)
+
+        self._nsamples = nsamples
+
+        self._states = pt.zeros((scenario.nstates, horizon + 1, nsamples))
+        self._inputs = pt.zeros((scenario.ninputs, horizon, nsamples))
+        self._outputs = pt.zeros((scenario.noutputs, horizon, nsamples))
+        self._costs = pt.zeros((horizon + 1, nsamples))
 
         self._pi_net = [PiNet([scenario.noutputs] + pi_net_sizes + [scenario.ninputs], pt.from_numpy(pi_net_cov).float()) for t in range(horizon)]
 
@@ -37,26 +44,21 @@ class PGPolicy(Policy):
         pi_log_probs = pt.zeros((self._horizon, nsamples))
 
         for titer in range(training_iterations):
-            res = self.rollout(nsamples)
+            self.rollout(nsamples)
 
-            states = pt.from_numpy(res[0]).float()
-            outputs = pt.from_numpy(res[1]).float()
-            inputs = pt.from_numpy(res[2]).float()
-            costs = pt.from_numpy(res[3]).float()
-
-            total_cost = costs.sum(axis=0).sum() / nsamples
+            total_cost = self._costs.sum(axis=0).sum() / nsamples
 
             if log:
                 print('[{0}]\t\tAvg. Cost: {1}'.format(titer, total_cost))
 
             for t in range(horizon):
                 for s in range(nsamples):
-                    pi_log_probs[t, s] = self._pi_net[t].log_prob(inputs[:, t, s], outputs[:, t, s])
+                    pi_log_probs[t, s] = self._pi_net[t].log_prob(self._inputs[:, t, s], self._outputs[:, t, s])
 
-            baseline = costs.sum(axis=0).mean()
+            baseline = self._costs.sum(axis=0).mean()
 
             pi_opt.zero_grad()
-            loss = (pt.mul(pi_log_probs.sum(axis=0), costs.sum(axis=0) - baseline)).sum() / nsamples
+            loss = (pt.mul(pi_log_probs.sum(axis=0), self._costs.sum(axis=0) - baseline)).sum() / nsamples
             loss.backward()
             pi_opt.step()
 
@@ -64,27 +66,25 @@ class PGPolicy(Policy):
 
     def rollout(self, nsamples: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         horizon = self._horizon
-        scenario = self._scenario
+        scenario = self._scenario        
 
-        states = np.zeros((scenario.nstates, horizon + 1, nsamples))
-        inputs = np.zeros((scenario.ninputs, horizon, nsamples))
-        outputs = np.zeros((scenario.noutputs, horizon, nsamples))
-        costs = np.zeros((horizon + 1, nsamples))
-
-        for s in range(nsamples):
+        for s in range(self._nsamples):
             t = 0
-            states[:, 0, s] = scenario.sample_initial_dist()
+            self._states[:, 0, s] = scenario.sample_initial_dist()
 
             for t in range(horizon):
-                outputs[:, t, s] = scenario.sensor(states[:, t, s], t)
-                inputs[:, t, s] = self._pi_net[t](pt.from_numpy(outputs[:, t, s]).float()).detach().numpy().astype('double')
-                costs[t, s] = scenario.cost(states[:, t, s], inputs[:, t, s], t)
+                self._outputs[:, t, s] = scenario.sensor(self._states[:, t, s], t)
+                self._inputs[:, t, s] = self._pi_net[t](self._outputs[:, t, s])
+                self._costs[t, s] = scenario.cost(self._states[:, t, s], self._inputs[:, t, s], t)
 
-                states[:, t + 1, s] = scenario.dynamics(states[:, t, s], inputs[:, t, s], t)
+                self._states[:, t + 1, s] = scenario.dynamics(self._states[:, t, s], self._inputs[:, t, s], t)
 
-            costs[-1, s] += scenario.terminal_cost(states[:, -1, s])
+            self._costs[-1, s] = scenario.terminal_cost(self._states[:, -1, s])
 
-        return states, outputs, inputs, costs
+        self._states = self._states.detach()
+        self._outputs = self._outputs.detach()
+        self._inputs = self._inputs.detach()
+        self._costs = self._costs.detach()
 
 class MINEPolicy(Policy):
     def __init__(self, scenario: Scenario, horizon: int, ntrvs: int,

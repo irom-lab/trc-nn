@@ -51,10 +51,10 @@ class LavaScenario(Scenario):
         while sample > 5:
             sample = self._sample_initial_dist()
 
-        return np.array([sample, 0])
+        return pt.tensor([sample, 0])
 
     def dynamics(self, state: np.ndarray, input: np.ndarray, t: int) -> np.ndarray:
-        updated_state = np.array([state[0] + state[1], state[1] + input])
+        updated_state = pt.tensor([state[0] + state[1], state[1] + input])
 
         if updated_state[0] < 0:
             updated_state[0] = 0
@@ -72,7 +72,7 @@ class LavaScenario(Scenario):
         if state[0] > 5:
             return 1000
         else:
-            return (1 / 2) * (30 * np.linalg.norm(state - np.array([3, 0])) ** 2 + input ** 2)
+            return (1 / 2) * (30 * pt.norm(state - pt.tensor([3, 0])) ** 2 + input ** 2)
 
     def terminal_cost(self, state: np.ndarray) -> float:
         return 10 * self.cost(state, 0, -1)
