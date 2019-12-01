@@ -1,6 +1,7 @@
 import numpy as np
 import torch as pt
 import torch.optim as optim
+import torch.multiprocessing as multi
 
 from scenarios import Scenario
 from networks import PiNet, QNet, Mine
@@ -37,16 +38,17 @@ class PGPolicy(Policy):
 
         self._pi_net = [PiNet([scenario.noutputs] + pi_net_sizes + [scenario.ninputs], pt.from_numpy(pi_net_cov).float()) for t in range(horizon)]
 
-    def train(self, training_iterations: int=10, lr=0.01, nsamples: int=500, log: bool=True):
+    def train(self, training_iterations: int=10, lr=0.01, log: bool=True):
         pi_opt = optim.Adam(chain(*[pi.parameters() for pi in self._pi_net]), lr=lr)
         horizon = self._horizon
+        nsamples = self._nsamples
 
         pi_log_probs = pt.zeros((self._horizon, nsamples))
 
         for titer in range(training_iterations):
             self.rollout(nsamples)
 
-            total_cost = self._costs.sum(axis=0).sum() / nsamples
+            total_cost = self._costs.sum(axis=0).mean()
 
             if log:
                 print('[{0}]\t\tAvg. Cost: {1}'.format(titer, total_cost))
@@ -58,28 +60,34 @@ class PGPolicy(Policy):
             baseline = self._costs.sum(axis=0).mean()
 
             pi_opt.zero_grad()
-            loss = (pt.mul(pi_log_probs.sum(axis=0), self._costs.sum(axis=0) - baseline)).sum() / nsamples
+            loss = (pt.mul(pi_log_probs.sum(axis=0), self._costs.sum(axis=0) - baseline)).mean()
             loss.backward()
             pi_opt.step()
 
             pi_log_probs = pi_log_probs.detach()
 
-    def rollout(self, nsamples: int) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+    def _compute_sample(self, s: int):
+        self._states[:, 0, s] = self._scenario.sample_initial_dist()
+
+        for t in range(self._horizon):
+            self._outputs[:, t, s] = self._scenario.sensor(self._states[:, t, s], t)
+            self._inputs[:, t, s] = self._pi_net[t](self._outputs[:, t, s])
+            self._costs[t, s] = self._scenario.cost(self._states[:, t, s], self._inputs[:, t, s], t)
+
+            self._states[:, t + 1, s] = self._scenario.dynamics(self._states[:, t, s], self._inputs[:, t, s], t)
+
+        self._costs[-1, s] = self._scenario.terminal_cost(self._states[:, -1, s])
+
+
+    def rollout(self, nsamples: int=-1) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
         horizon = self._horizon
-        scenario = self._scenario        
+        scenario = self._scenario
 
-        for s in range(self._nsamples):
-            t = 0
-            self._states[:, 0, s] = scenario.sample_initial_dist()
+        if nsamples < 0:
+            nsamples = self._nsamples
 
-            for t in range(horizon):
-                self._outputs[:, t, s] = scenario.sensor(self._states[:, t, s], t)
-                self._inputs[:, t, s] = self._pi_net[t](self._outputs[:, t, s])
-                self._costs[t, s] = scenario.cost(self._states[:, t, s], self._inputs[:, t, s], t)
-
-                self._states[:, t + 1, s] = scenario.dynamics(self._states[:, t, s], self._inputs[:, t, s], t)
-
-            self._costs[-1, s] = scenario.terminal_cost(self._states[:, -1, s])
+        for s in range(nsamples):
+            self._compute_sample(s)
 
         self._states = self._states.detach()
         self._outputs = self._outputs.detach()
