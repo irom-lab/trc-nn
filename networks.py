@@ -104,6 +104,91 @@ class Mine(nn.Module):
 
         return moving_average(values, value_filter_window)
 
+class Klne(nn.Module):
+    def __init__(self, input_size=2, hidden_size=100):
+        super().__init__()
+
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.fc3 = nn.Linear(hidden_size, 1)
+
+        nn.init.normal_(self.fc1.weight,std=0.02)
+        nn.init.constant_(self.fc1.bias, 0)
+        nn.init.normal_(self.fc2.weight,std=0.02)
+        nn.init.constant_(self.fc2.bias, 0)
+        nn.init.normal_(self.fc3.weight,std=0.02)
+        nn.init.constant_(self.fc3.bias, 0)
+
+        self._best_value = -np.inf
+
+    def forward(self, input):
+        output = fn.elu(self.fc1(input))
+        output = fn.elu(self.fc2(output))
+        output = self.fc3(output)
+
+        return output
+
+    @property
+    def best_value(self):
+        return self._best_value
+
+    def train(self, data: pt.Tensor, batch_size: int=None,
+              iters: int=int(5e2), log: bool=False, lr: float=1e-3,
+              unbiased: bool=True, ma_rate: float=0.01,
+              value_filter_window: int=10):
+
+        assert(data[0].shape[1] == data[1].shape[1])
+
+        num_datapts = data[0].shape[1]
+
+        if batch_size is None:
+            batch_size = int(num_datapts / 10.0)
+
+        x_data, z_data = data
+        opt = optim.Adam(self.parameters(), lr=lr)
+
+        self._best_value = -1
+
+        moving_avg_eT = 1
+
+        values = np.zeros(iters)
+
+        for i in range(iters):
+            marginal_batch_idx1 = np.random.choice(range(num_datapts), size=batch_size, replace=False)
+            marginal_batch_idx2 = np.random.choice(range(num_datapts), size=batch_size, replace=False)
+
+            p_batch = x_data[:, marginal_batch_idx1].t()
+            q_batch = z_data[:, marginal_batch_idx2].t()
+
+            p_T = self(p_batch)
+            q_T = self(q_batch)
+
+            if unbiased:
+                mean_T = p_T.mean()
+                eT = pt.mean(pt.exp(q_T))
+
+                moving_avg_eT = ((1 - ma_rate) * moving_avg_eT + ma_rate * eT).detach()
+
+                loss = -(mean_T - (1 / moving_avg_eT) * eT)
+                value = float(mean_T - pt.log(eT))
+            else:
+                loss = -(p_T.mean() - pt.log(pt.mean(pt.exp(q_T))))
+                value = float(-loss)
+
+            values[i] = value
+
+            if value > self._best_value:
+                self._best_value = value
+
+            if log:
+                print('[{0}]\t\t{1}'.format(i, value))
+
+            opt.zero_grad()
+            loss.backward()
+            opt.step()
+
+        return moving_average(values, value_filter_window)
+
 class FFNet(nn.Module):
     def __init__(self, sizes: List[int]):
         super().__init__()

@@ -66,11 +66,11 @@ class LavaScenario(Scenario):
         return updated_state
 
     def sensor(self, state: np.ndarray, t: int) -> np.ndarray:
-        return state[0] + self._sample_sensor_noise()#np.random.normal(state[0], np.sqrt(self._sensor_noise_cov))
+        return state[0] + self._sample_sensor_noise()
 
     def cost(self, state: np.ndarray, input: np.ndarray, t: int) -> float:
         if state[0] > 5:
-            return 1000
+            return pt.tensor([1000.0])
         else:
             return (1 / 2) * (30 * pt.norm(state - pt.tensor([3, 0])) ** 2 + input ** 2)
 

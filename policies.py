@@ -95,7 +95,7 @@ class PGPolicy(Policy):
         self._costs = self._costs.detach()
 
 class MINEPolicy(Policy):
-    def __init__(self, scenario: Scenario, horizon: int, ntrvs: int,
+    def __init__(self, scenario: Scenario, horizon: int, nsamples: int, ntrvs: int,
                  q_net_sizes: List[int], q_net_cov: np.ndarray,
                  pi_net_sizes: List[int], pi_net_cov: np.ndarray,
                  tradeoff: float, mine_params):
@@ -109,8 +109,9 @@ class MINEPolicy(Policy):
         self._mine = [Mine(scenario.nstates + ntrvs, mine_params['hidden_size']) for t in range(horizon)]
 
     def train(self, training_iterations: int=10, qlr=0.0001, pilr=0.0001, nsamples: int=500, log: bool=True):
-        pi_opt = optim.Adam(chain(*[pi.parameters() for pi in self._pi_net]), lr=pilr)
-        q_opt = optim.Adam(chain(*[q.parameters() for q in self._q_net]), lr=qlr)
+        #pi_opt = optim.Adam(chain(*[pi.parameters() for pi in self._pi_net]), lr=pilr)
+        #q_opt = optim.Adam(chain(*[q.parameters() for q in self._q_net]), lr=qlr)
+        opt = optim.Adam(chain(*([pi.parameters() for pi in self._pi_net] + [q.parameters() for q in self._q_net])), lr=pilr)
         horizon = self._horizon
 
         pi_log_probs = pt.zeros((self._horizon, nsamples))
@@ -118,24 +119,21 @@ class MINEPolicy(Policy):
         mi = pt.zeros(horizon)
 
         for titer in range(training_iterations):
-            res = self.rollout(nsamples)
-
-            states = pt.from_numpy(res[0]).float()
-            outputs = pt.from_numpy(res[1]).float()
-            trvs = pt.from_numpy(res[2]).float()
-            inputs = pt.from_numpy(res[3]).float()
-            costs = pt.from_numpy(res[4]).float()
+            states, outputs, trvs, inputs, costs = self.rollout(nsamples)
+            states.requires_grad_(True)
+            outputs.requires_grad_(True)
+            inputs.requires_grad_(True)
+            costs.requires_grad_(True)
+            trvs.requires_grad_(True)
 
             total_cost = costs.sum(axis=0).sum() / nsamples
 
-            if self._tradeoff > 0:
-                states_cuda = states.cuda()
-                trvs_cuda = trvs.cuda()
+            if self._tradeoff > -1:
+                states_cuda = states.detach()
+                trvs_cuda = trvs.detach()
 
                 for t in range(horizon):
-                    self._mine[t].cuda()
-                    mi[t] = self._mine[t].train((states_cuda[:, t, :], trvs_cuda[:, t, :]))[-1]
-                    self._mine[t].cpu()
+                    mi[t] = self._mine[t].train((states_cuda[:, t, :], trvs_cuda[:, t, :]), iters=500, value_filter_window=2)[-1]
 
                     num_datapts = states.shape[2]
                     batch_size = num_datapts
@@ -152,8 +150,6 @@ class MINEPolicy(Policy):
 
                     mi[t] = j_T.mean() - pt.log(pt.mean(pt.exp(m_T)))
 
-
-
             for t in range(horizon):
                 for s in range(nsamples):
                     pi_log_probs[t, s] = self._pi_net[t].log_prob(inputs[:, t, s], trvs[:, t, s])
@@ -164,55 +160,65 @@ class MINEPolicy(Policy):
                        q_log_probs[t, s] = self._q_net[t].log_prob(trvs[:, t, s], outputs[:, t, s])
 
             if log:
-                print('[{0}]\t\tAvg. Cost: {1:.3f}\t\tEst. MI: {2:.3f}\t\tTotal: {3:.3f}'.format(titer, total_cost, self._tradeoff * float(mi.sum().item()), total_cost + float(mi.sum().item())))
+                print('[{0}]\t\tAvg. Cost: {1:.3f}\t\tEst. MI: {2:.3f}\t\tTotal: {3:.3f}'.format(titer, total_cost, mi.sum().item(), total_cost + self._tradeoff * mi.sum().item()))
 
-            pi_opt.zero_grad()
-            q_opt.zero_grad()
+            opt.zero_grad()
 
             baseline = costs.sum(axis=0).mean()
+            mi_sum = mi.sum()
 
-            pi_loss = (pt.mul(pi_log_probs.sum(axis=0), costs.sum(axis=0) - baseline)).sum() / nsamples
-            q_loss = self._tradeoff * (pt.mul(q_log_probs.sum(axis=0), costs.sum(axis=0) - baseline)).sum() / nsamples +  mi.sum()
+            loss = ((pt.mul(pi_log_probs.sum(axis=0), costs.sum(axis=0) - baseline)).sum() / nsamples + pt.mul(q_log_probs.sum(axis=0), costs.sum(axis=0) - baseline).sum() / nsamples) + self._tradeoff * mi_sum
 
-            pi_loss.backward()
-            q_loss.backward()
+            loss.backward()
 
-            pi_opt.step()
-            q_opt.step()
+            opt.step()
 
             pi_log_probs = pi_log_probs.detach()
-            q_log_probs = q_log_probs.detach()
             mi = mi.detach()
+            q_log_probs = q_log_probs.detach()
 
     def rollout(self, nsamples):
         horizon = self._horizon
         scenario = self._scenario
 
-        with pt.no_grad():
-            states = np.zeros((scenario.nstates, horizon + 1, nsamples))
-            trvs = np.zeros((self._ntrvs, horizon, nsamples))
-            inputs = np.zeros((scenario.ninputs, horizon, nsamples))
-            outputs = np.zeros((scenario.noutputs, horizon, nsamples))
-            costs = np.zeros((horizon + 1, nsamples))
+        states = [] * nsamples
+        trvs = [] * nsamples
+        inputs = [] * nsamples
+        outputs = [] * nsamples
+        costs = [] * nsamples
 
-            for s in range(nsamples):
-                t = 0
-                states[:, 0, s] = scenario.sample_initial_dist()
+        for s in range(nsamples):
+            traj_states = [scenario.sample_initial_dist().reshape(1, -1)]
+            traj_outputs = []
+            traj_trvs = []
+            traj_inputs = []
+            traj_costs = []
 
-                for t in range(horizon):
-                    outputs[:, t, s] = scenario.sensor(states[:, t, s], t)
+            for t in range(horizon):
+                traj_outputs.append(scenario.sensor(traj_states[t].flatten(), t).reshape((1, -1)))
 
-                    if self._q_net[t]._x_tilde_prev:
-                        trvs[:, t, s] = self._q_net[t](pt.from_numpy(outputs[:, t, s]).float(), pt.from_numpy(trvs[:, t - 1, s]).float()).detach().numpy().astype('double')
-                    else:
-                        trvs[:, t, s] = self._q_net[t](pt.from_numpy(outputs[:, t, s]).float()).detach().numpy().astype('double')
+                if self._q_net[t]._x_tilde_prev:
+                    traj_trvs.append(self._q_net[t](traj_outputs[t].flatten(), traj_trvs[t - 1].flatten().detach()).reshape((1, -1)))
+                else:
+                    traj_trvs.append(self._q_net[t](traj_outputs[t].flatten()).reshape((1, -1)))
 
-                    inputs[:, t, s] = self._pi_net[t](pt.from_numpy(trvs[:, t, s]).float()).detach().numpy().astype('double')
+                traj_inputs.append(self._pi_net[t](traj_trvs[t].flatten()).reshape((1, -1)))
 
-                    costs[t, s] = scenario.cost(states[:, t, s], inputs[:, t, s], t)
+                traj_costs.append(scenario.cost(traj_states[t].flatten(), traj_inputs[t].flatten(), t).reshape((1, -1)))
+                traj_states.append(scenario.dynamics(traj_states[t].flatten(), traj_inputs[t].flatten(), t).detach().reshape((1, -1)))
 
-                    states[:, t + 1, s] = scenario.dynamics(states[:, t, s], inputs[:, t, s], t)
+            traj_costs.append(scenario.terminal_cost(traj_states[-1].flatten()).reshape((1, -1)))
 
-                costs[-1, s] += scenario.terminal_cost(states[:, -1, s])
+            states.append(pt.cat(traj_states, 0).t())
+            outputs.append(pt.cat(traj_outputs, 0).t())
+            trvs.append(pt.cat(traj_trvs, 0).t())
+            inputs.append(pt.cat(traj_inputs, 0).t())
+            costs.append(pt.cat(traj_costs, 0).t())
 
-            return states, outputs, trvs, inputs, costs
+        states = pt.stack(states, axis=2)
+        outputs = pt.stack(outputs, axis=2)
+        trvs = pt.stack(trvs, axis=2)
+        inputs = pt.stack(inputs, axis=2)
+        costs = pt.stack(costs, axis=2)
+
+        return states, outputs, trvs, inputs.detach(), costs.detach()
