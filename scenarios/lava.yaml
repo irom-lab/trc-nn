@@ -1,0 +1,25 @@
+scenario:
+  sensor_cov: 0.001
+  init_cov: 0.5
+
+policy:
+  horizon: 5
+  ntrvs: 5
+  epochs: 200
+  tradeoff: 100
+
+  q_layers:
+    - 64
+    - 64
+
+  pi_layers:
+    - 64
+    - 128
+
+  gpu: false
+  nsamples: 500
+  lr: 0.0001
+
+  mine:
+    hidden_size: 512
+    epochs: 100
