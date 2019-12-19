@@ -5,11 +5,15 @@ import torch.optim as optim
 
 import numpy as np
 
+import copy
+
 from typing import List, Tuple, Union
 
 from torch.distributions.multivariate_normal import MultivariateNormal
 
 from abc import abstractmethod
+
+from torch.utils.tensorboard import SummaryWriter
 
 def moving_average(series: np.ndarray, window_size: int=100):
     return [np.mean(series[i:(i + window_size)]) for i in range(0, len(series) - window_size)]
@@ -20,6 +24,61 @@ def log_prob_mvn(x: pt.Tensor, mean: pt.Tensor, cov: pt.Tensor):
 
     return (pt.exp(-0.5 * pt.mm(center.t(), pt.mm(cov, center))) / pt.sqrt((2 * np.pi) ** k * pt.det(cov))).log()
 
+def train_mine_network(mine, data: pt.Tensor, batch_size: int=None, epochs: int=int(5e2), log: bool=False, lr: float=1e-3,
+                       unbiased: bool=True, ma_rate: float=0.01, tag=None):
+          assert(data[0].shape[1] == data[1].shape[1])
+
+          num_datapts = data[0].shape[1]
+
+          if batch_size is None:
+              batch_size = int(num_datapts / 10.0)
+
+          x_data, z_data = data
+          moving_avg_eT = 1
+          values = np.zeros(epochs)
+          opt = optim.Adam(mine.parameters(), lr=lr)
+
+          if tag is not None:
+              writer = SummaryWriter(tag)
+
+          for epoch in range(epochs):
+              joint_batch_idx = np.random.choice(range(num_datapts), size=batch_size, replace=False)
+              marginal_batch_idx1 = np.random.choice(range(num_datapts), size=batch_size, replace=False)
+              marginal_batch_idx2 = np.random.choice(range(num_datapts), size=batch_size, replace=False)
+
+              joint_batch = pt.cat((x_data[:, joint_batch_idx], z_data[:, joint_batch_idx]), axis=0).t()
+              marginal_batch = pt.cat((x_data[:, marginal_batch_idx1], z_data[:, marginal_batch_idx2]), axis=0).t()
+
+              j_T = mine(joint_batch)
+              m_T = mine(marginal_batch)
+
+              if unbiased:
+                  mean_T = j_T.mean()
+                  eT = pt.mean(pt.exp(m_T))
+
+                  moving_avg_eT = ((1 - ma_rate) * moving_avg_eT + ma_rate * eT).detach()
+
+                  loss = -(mean_T - (1 / moving_avg_eT) * eT)
+                  value = float(mean_T - pt.log(eT))
+              else:
+                  loss = -(j_T.mean() - pt.log(pt.mean(pt.exp(m_T))))
+                  value = -loss.item()
+
+              values[epoch] = value
+
+              if log:
+                  print('[{0}]\t\t{1}'.format(i, value))
+
+              if tag is not None:
+                  writer.add_scalar('MINE', value, i)
+
+              opt.zero_grad()
+              loss.backward()
+              opt.step()
+
+          return values
+
+
 class Mine(nn.Module):
     def __init__(self, input_size=2, hidden_size=100):
         super().__init__()
@@ -27,13 +86,6 @@ class Mine(nn.Module):
         self.fc1 = nn.Linear(input_size, hidden_size)
         self.fc2 = nn.Linear(hidden_size, hidden_size)
         self.fc3 = nn.Linear(hidden_size, 1)
-
-        nn.init.normal_(self.fc1.weight,std=0.02)
-        nn.init.constant_(self.fc1.bias, 0)
-        nn.init.normal_(self.fc2.weight,std=0.02)
-        nn.init.constant_(self.fc2.bias, 0)
-        nn.init.normal_(self.fc3.weight,std=0.02)
-        nn.init.constant_(self.fc3.bias, 0)
 
         self._best_value = -np.inf
 
@@ -51,7 +103,7 @@ class Mine(nn.Module):
     def train(self, data: pt.Tensor, batch_size: int=None,
               iters: int=int(5e2), log: bool=False, lr: float=1e-3,
               unbiased: bool=True, ma_rate: float=0.01,
-              value_filter_window: int=10):
+              value_filter_window: int=10, tag=None):
 
         assert(data[0].shape[1] == data[1].shape[1])
 
@@ -68,6 +120,9 @@ class Mine(nn.Module):
         moving_avg_eT = 1
 
         values = np.zeros(iters)
+
+        if tag is not None:
+            writer = SummaryWriter(tag)
 
         for i in range(iters):
             joint_batch_idx = np.random.choice(range(num_datapts), size=batch_size, replace=False)
@@ -100,16 +155,19 @@ class Mine(nn.Module):
             if log:
                 print('[{0}]\t\t{1}'.format(i, value))
 
+            if tag is not None:
+                writer.add_scalar('MINE', value, i)
+
             opt.zero_grad()
             loss.backward()
             opt.step()
 
-        return moving_average(values, value_filter_window)
+        return values
 
 class FFNet(nn.Module):
     def __init__(self, sizes: List[int]):
         super().__init__()
-        self._linears = [nn.Linear(sizes[i], sizes[i + 1]) for i in range(len(sizes) - 2)]
+        self._linears = nn.ModuleList([nn.Linear(sizes[i], sizes[i + 1]) for i in range(len(sizes) - 2)])
         self._final_layer = nn.Linear(sizes[-2], sizes[-1])
         self._sizes = sizes.copy()
 
@@ -132,18 +190,13 @@ class QNet(nn.Module):
         pass
 
 class QNetTV(QNet):
-    def __init__(self, module_list: List[nn.Module], horizon: int):
+    def __init__(self, make_sequence, horizon: int):
         super().__init__()
-        self._module_list = nn.ModuleList([nn.ModuleList(module_list) for t in range(horizon)])
+        self._module_list = nn.ModuleList([make_sequence(t) for t in range(horizon)])
 
     def forward(self, output, prev_trv, t):
         input = pt.cat([output, prev_trv], 0)
-        net = self._module_list[t]
-
-        for module in net:
-            input = module(input)
-
-        output = input
+        output = self._module_list[t](input)
         outsize = int(len(output) / 2)
 
         mean = output[:outsize]
@@ -154,12 +207,7 @@ class QNetTV(QNet):
 
     def log_prob(self, trv, output, prev_trv, t):
         input = pt.cat([output, prev_trv], 0)
-        net = self._module_list[t]
-
-        for module in net:
-            input = module(input)
-
-        output = input
+        output = self._module_list[t](input)
         outsize = int(len(output) / 2)
 
         mean = output[:outsize]
@@ -192,18 +240,12 @@ class PiNet(nn.Module):
         pass
 
 class PiNetTV(PiNet):
-    def __init__(self, module_list: List[nn.Module], horizon: int):
+    def __init__(self, make_sequence, horizon: int):
         super().__init__()
-        self._module_list = nn.ModuleList([nn.ModuleList(module_list) for t in range(horizon)])
+        self._module_list = nn.ModuleList([make_sequence(t) for t in range(horizon)])
 
     def forward(self, trv, t):
-        net = self._module_list[t]
-
-        for module in net:
-            trv = module(trv)
-
-        output = trv
-
+        output = self._module_list[t](trv)
         outsize = int(len(output) / 2)
 
         mean = output[:outsize]
@@ -213,12 +255,7 @@ class PiNetTV(PiNet):
         return mean + linear.matmul(sample)
 
     def log_prob(self, input, trv, t):
-        net = self._module_list[t]
-
-        for module in net:
-            trv = module(trv)
-
-        output = trv
+        output = self._module_list[t](trv)
         outsize = int(len(output) / 2)
 
         mean = output[:outsize]
@@ -256,7 +293,7 @@ class PiNetOld(FFNet):
 
 
 class PiNet2(FFNet):
-    def __init__(self, sizes: List[int], cov):
+    def __init__(self, sizes: List[int]):
         self._sizes = sizes.copy()
         self._outsize = sizes[-1]
         self._sizes[-1] = self._sizes[-1] * 2
@@ -267,7 +304,7 @@ class PiNet2(FFNet):
         output = super().forward(x)
 
         mean = output[:self._outsize]
-        linear = pt.diag(output[self._outsize:])
+        linear = pt.diag(output[self._outsize:] + 1e-6)
         sample = pt.distributions.multivariate_normal.MultivariateNormal(pt.zeros(self._outsize), pt.eye(self._outsize)).sample()
 
         return mean + linear.matmul(sample)
@@ -344,7 +381,7 @@ class QNetOld(FFNet):
         return log_prob_mvn(x_tilde, mean, self._cov)
 
 class QNet2(FFNet):
-    def __init__(self, sizes: List[int], cov, x_tilde_prev: bool=True):
+    def __init__(self, sizes: List[int], x_tilde_prev: bool=True):
         self._sizes = sizes.copy()
         self._outsize = sizes[-1]
         self._sizes[-1] = self._sizes[-1] * 2

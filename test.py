@@ -22,5 +22,5 @@ scenario = scenarios.LavaScenario(sample_initial_dist, lambda: sample_sensor_noi
 
 print(f'Tradeoff: {tradeoff}')
 
-policy = policies.MINEPolicy2(scenario, 5, 500, ntrvs, [64, 64], 0.1 * np.eye(ntrvs), [64, 64], 0.1 * np.eye(scenario.ninputs), tradeoff, {'hidden_size' : 256, 'epochs' : 100})
-policy.train(nsamples=500, training_iterations=300, qlr=0.001, pilr=0.0001)
+policy = policies.MINEPolicy2(scenario, 5, 500, ntrvs, [64, 64], 0.1 * np.eye(ntrvs), [64, 64], 0.1 * np.eye(scenario.ninputs), tradeoff, {'hidden_size' : 512, 'epochs' : 100})
+policy.train(nsamples=500, training_iterations=1000, qlr=0.001, pilr=0.0001)
