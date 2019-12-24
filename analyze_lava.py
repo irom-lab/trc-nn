@@ -25,13 +25,13 @@ def sample_sensor_noise(cov):
     return pt.tensor([0])#np.random.normal(0, np.sqrt(cov))
 
 scenario = scenarios.LavaScenario(sample_initial_dist, lambda: sample_sensor_noise(0.001))
-ntrvs = 2
+ntrvs = 5
 horizon = 5
-batch_size = 100
+batch_size = 1
 
 def make_pi_sequence(t: int):
     return nn.Sequential(
-        nn.Linear(scenario.noutputs, 64),
+        nn.Linear(ntrvs, 64),
         nn.ELU(),
         nn.Linear(64, 64),
         nn.ELU(),
@@ -46,6 +46,7 @@ def make_q_sequence(t: int):
         nn.ELU(),
         nn.Linear(64, ntrvs * 2)
     )
+
 
 pi_net = PiNetTV(make_pi_sequence, horizon)
 q_net = QNetTV(make_q_sequence, horizon)

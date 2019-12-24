@@ -65,7 +65,7 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
         mi_sum = mi.sum()
 
         new_time = time.time()
-        print(f'[{epoch}: {new_time - last_time:.3f}]\t\tAvg. Cost: {value:.3f}\t\tEst. MI: {mi_sum.item():.3f}\t\tTotal: {value + tradeoff * mi_sum.item():.3f}')
+        print(f'[{epoch}: {new_time - last_time:.3f}]\t\tAvg. Cost: {value:.3f}\t\tEst. MI: {mi_sum.item():.5f}\t\tTotal: {value + tradeoff * mi_sum.item():.3f}')
         last_time = new_time
 
         for s in range(batch_size):
@@ -73,7 +73,7 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
 
             for t in range(horizon):
                 q_log_probs[t, s] = q_net.log_prob(trvs[:, t, s].detach(), outputs[:, t, s], trv.detach(), t)
-                pi_log_probs[t, s] = pi_net.log_prob(inputs[:, t, s], trvs[:, t, s], t)
+                pi_log_probs[t, s] = pi_net.log_prob(inputs[:, t, s].detach(), trvs[:, t, s].detach(), t)
                 trv = trvs[:, t, s]
 
         baseline = costs.sum(axis=0).mean()
@@ -83,7 +83,6 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
                pt.mul(q_log_probs.sum(axis=0), costs.sum(axis=0) - baseline).mean() + \
                tradeoff * mi_sum
         loss.backward()
-
         opt.step()
 
         if tag is not None:
@@ -113,11 +112,12 @@ def rollout(pi_net, q_net, ntrvs, scenario, horizon, batch_size):
         traj_inputs = []
         traj_costs = []
 
-        trv = pt.zeros(ntrvs).reshape((-1, 1))
+        trv = pt.zeros(ntrvs, requires_grad=True).reshape((-1, 1))
 
         for t in range(horizon):
             traj_outputs.append(scenario.sensor(traj_states[-1].flatten(), t).reshape((-1, 1)))
 
+            traj_outputs[t].requires_grad_(True)
             trv = q_net(traj_outputs[t].flatten(), trv.flatten(), t).reshape((-1, 1))
             traj_trvs.append(trv)
 
@@ -133,10 +133,13 @@ def rollout(pi_net, q_net, ntrvs, scenario, horizon, batch_size):
         inputs.append(pt.cat(traj_inputs, axis=1))
         costs.append(pt.cat(traj_costs, axis=1))
 
-    states = pt.stack(states, axis=2).detach()
-    outputs = pt.stack(outputs, axis=2).detach()
+
+    states = pt.stack(states, axis=2)
+    outputs = pt.stack(outputs, axis=2)
     trvs = pt.stack(trvs, axis=2)
-    inputs = pt.stack(inputs, axis=2).detach()
+    inputs = pt.stack(inputs, axis=2)
     costs = pt.stack(costs, axis=2)[0, :, :].detach()
+
+
 
     return states, outputs, trvs, inputs, costs

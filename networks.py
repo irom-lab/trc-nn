@@ -99,9 +99,9 @@ class QNetTV(QNet):
 
         mean = output[:outsize]
         logcov = output[outsize:]
-        cov = pt.diag(pt.exp(logcov) + 1e-6)
+        linear = pt.diag((pt.exp(logcov) + 1e-3).sqrt())
 
-        return MultivariateNormal(mean, cov).sample()
+        return mean + linear.matmul(MultivariateNormal(pt.zeros(outsize), pt.eye(outsize)).sample())
 
     def log_prob(self, trv, output, prev_trv, t):
         input = pt.cat([output, prev_trv], 0)
@@ -110,7 +110,7 @@ class QNetTV(QNet):
 
         mean = output[:outsize]
         logcov = output[outsize:]
-        cov = pt.diag(pt.exp(logcov) + 1e-6)
+        cov = pt.diag(pt.exp(logcov) + 1e-3)
 
         return MultivariateNormal(mean, cov).log_prob(trv)
 
@@ -148,7 +148,7 @@ class PiNetTV(PiNet):
 
         mean = output[:outsize]
         logcov = output[outsize:]
-        cov = pt.diag(pt.exp(logcov) + 1e-6)
+        cov = pt.diag(pt.exp(logcov) + 1e-3)
 
         return MultivariateNormal(mean, cov).sample()
 
@@ -158,7 +158,7 @@ class PiNetTV(PiNet):
 
         mean = output[:outsize]
         logcov = output[outsize:]
-        cov = pt.diag(pt.exp(logcov) + 1e-6)
+        cov = pt.diag(pt.exp(logcov) + 1e-3)
 
         return MultivariateNormal(mean, cov).log_prob(input)
 
