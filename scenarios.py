@@ -54,35 +54,32 @@ class LavaScenario(Scenario):
         super().__init__()
 
     def sample_initial_dist(self):
-        sample = np.inf
-        while sample > 5:
-            sample = self._sample_initial_dist()
+        sample_pos = np.inf
 
-        return pt.tensor([sample, 0])
+        while sample_pos > 5:
+            sample_pos = self._sample_initial_dist()
+
+        return pt.tensor([sample_pos, 0])
 
     def dynamics(self, state: np.ndarray, input: np.ndarray, t: int) -> np.ndarray:
         updated_state = pt.tensor([state[0] + state[1], state[1] + input])
 
         if updated_state[0] < 0:
-            updated_state[0] = 0
-            updated_state[1] *= 0.5
-
-        if updated_state[0] > 5:
+            updated_state[0] = 0.0
+            updated_state[1] = 0.0
+        elif updated_state[0] > 5:
             updated_state[1] = 0
 
         return updated_state
 
     def sensor(self, state: np.ndarray, t: int) -> np.ndarray:
-        return state[0] + self._sample_sensor_noise()
+        return state + self._sample_sensor_noise()
 
     def cost(self, state: np.ndarray, input: np.ndarray, t: int) -> float:
-        if state[0] > 5:
-            return pt.tensor([1000.0])
-        else:
-            return (1 / 2) * (30 * pt.norm(state - pt.tensor([3, 0])) ** 2 + input ** 2)
+        return pt.tensor([pt.norm(state - pt.tensor([3, 0])) ** 2])
 
     def terminal_cost(self, state: np.ndarray) -> float:
-        return 10 * self.cost(state, 0, -1)
+        return 100 * self.cost(state, 0, -1)
 
     @property
     def name(self) -> str:
@@ -98,7 +95,47 @@ class LavaScenario(Scenario):
 
     @property
     def noutputs(self):
+        return 2
+
+class LQRScenario(Scenario):
+    def __init__(self, sample_initial_dist, sample_sensor_noise):
+        self._sample_initial_dist = sample_initial_dist
+        self._sample_sensor_noise = sample_sensor_noise
+
+        super().__init__()
+
+    def sample_initial_dist(self):
+        return self._sample_initial_dist()
+
+    def dynamics(self, state: np.ndarray, input: np.ndarray, t: int) -> np.ndarray:
+        updated_state = pt.tensor([state[0] + state[1], state[1] + input])
+
+        return updated_state
+
+    def sensor(self, state: np.ndarray, t: int) -> np.ndarray:
+        return state + self._sample_sensor_noise()
+
+    def cost(self, state: np.ndarray, input: np.ndarray, t: int) -> float:
+        return pt.tensor([pt.norm(state - pt.tensor([3, 0])) ** 2])
+
+    def terminal_cost(self, state: np.ndarray) -> float:
+        return 100 * self.cost(state, 0, -1)
+
+    @property
+    def name(self) -> str:
+        return 'LQR'
+
+    @property
+    def nstates(self):
+        return 2
+
+    @property
+    def ninputs(self):
         return 1
+
+    @property
+    def noutputs(self):
+        return 2
 
 class BallScenario(Scenario):
     def __init__(self, robot_init_cov: float,

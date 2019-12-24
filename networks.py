@@ -2,18 +2,15 @@ import torch as pt
 import torch.nn as nn
 import torch.nn.functional as fn
 import torch.optim as optim
-
 import numpy as np
-
 import copy
 
 from typing import List, Tuple, Union
+from torch.distributions.multivariate_normal import MultivariateNormal
+from abc import abstractmethod
+from torch.utils.tensorboard import SummaryWriter
 
 from torch.distributions.multivariate_normal import MultivariateNormal
-
-from abc import abstractmethod
-
-from torch.utils.tensorboard import SummaryWriter
 
 def moving_average(series: np.ndarray, window_size: int=100):
     return [np.mean(series[i:(i + window_size)]) for i in range(0, len(series) - window_size)]
@@ -200,10 +197,10 @@ class QNetTV(QNet):
         outsize = int(len(output) / 2)
 
         mean = output[:outsize]
-        linear = pt.diag(output[outsize:] + 1e-6)
-        sample = pt.distributions.multivariate_normal.MultivariateNormal(pt.zeros(outsize), pt.eye(outsize)).sample()
+        logcov = output[outsize:]
+        cov = pt.diag(pt.exp(logcov) + 1e-6)
 
-        return mean + linear.matmul(sample)
+        return MultivariateNormal(mean, cov).sample()
 
     def log_prob(self, trv, output, prev_trv, t):
         input = pt.cat([output, prev_trv], 0)
@@ -211,10 +208,10 @@ class QNetTV(QNet):
         outsize = int(len(output) / 2)
 
         mean = output[:outsize]
-        linear = pt.diag(output[outsize:] + 1e-6)
-        mvn = pt.distributions.multivariate_normal.MultivariateNormal(mean, linear.matmul(linear.t()))
+        logcov = output[outsize:]
+        cov = pt.diag(pt.exp(logcov) + 1e-6)
 
-        return mvn.log_prob(trv)
+        return MultivariateNormal(mean, cov).log_prob(trv)
 
 class QNetShared(QNetTV):
     def __init__(self, module_list: List[nn.Module]):
@@ -249,20 +246,20 @@ class PiNetTV(PiNet):
         outsize = int(len(output) / 2)
 
         mean = output[:outsize]
-        linear = pt.diag(output[outsize:] + 1e-6)
-        sample = pt.distributions.multivariate_normal.MultivariateNormal(pt.zeros(outsize), pt.eye(outsize)).sample()
+        logcov = output[outsize:]
+        cov = pt.diag(pt.exp(logcov) + 1e-6)
 
-        return mean + linear.matmul(sample)
+        return MultivariateNormal(mean, cov).sample()
 
     def log_prob(self, input, trv, t):
         output = self._module_list[t](trv)
         outsize = int(len(output) / 2)
 
         mean = output[:outsize]
-        linear = pt.diag(output[outsize:] + 1e-6)
-        mvn = pt.distributions.multivariate_normal.MultivariateNormal(mean, linear.matmul(linear.t()))
+        logcov = output[outsize:]
+        cov = pt.diag(pt.exp(logcov) + 1e-6)
 
-        return mvn.log_prob(input)
+        return MultivariateNormal(mean, cov).log_prob(input)
 
 class PiNetShared(PiNetTV):
     def __init__(self, module_list: List[nn.Module], horizon: int):
