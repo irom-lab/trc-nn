@@ -17,14 +17,14 @@ def sample_initial_dist():
     return Uniform(0, 5).sample()#np.random.normal(2.5, 0.1)
 
 def sample_sensor_noise(cov):
-    return pt.tensor([0])#np.random.normal(0, np.sqrt(cov))
+    return MultivariateNormal(pt.zeros(1), pt.eye(1) * cov).sample()
 
 scenario = scenarios.LavaScenario(sample_initial_dist, lambda: sample_sensor_noise(0.001))
 ntrvs = 5
 horizon = 5
 tradeoff = int(sys.argv[1])
 batch_size = 1000
-epochs = 1000
+epochs = 300
 lr = 0.0005
 
 class Mine(nn.Module):

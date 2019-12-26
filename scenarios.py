@@ -73,7 +73,7 @@ class LavaScenario(Scenario):
         return updated_state
 
     def sensor(self, state: np.ndarray, t: int) -> np.ndarray:
-        return state + self._sample_sensor_noise()
+        return state[0] + self._sample_sensor_noise()
 
     def cost(self, state: np.ndarray, input: np.ndarray, t: int) -> float:
         return pt.tensor([pt.norm(state - pt.tensor([3, 0])) ** 2])
@@ -95,7 +95,7 @@ class LavaScenario(Scenario):
 
     @property
     def noutputs(self):
-        return 2
+        return 1
 
 class LQRScenario(Scenario):
     def __init__(self, sample_initial_dist, sample_sensor_noise):
