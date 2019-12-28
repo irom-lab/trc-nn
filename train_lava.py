@@ -17,15 +17,15 @@ def sample_initial_dist():
     return Uniform(0, 5).sample()#np.random.normal(2.5, 0.1)
 
 def sample_sensor_noise(cov):
-    return MultivariateNormal(pt.zeros(1), pt.eye(1) * cov).sample()
+    return MultivariateNormal(pt.zeros(2), pt.eye(2) * cov).sample()
 
-scenario = scenarios.LavaScenario(sample_initial_dist, lambda: sample_sensor_noise(0.001))
-ntrvs = 5
+scenario = scenarios.LavaScenario(sample_initial_dist, lambda: sample_sensor_noise(0.0001))
+ntrvs = 2
 horizon = 5
 tradeoff = int(sys.argv[1])
-batch_size = 1000
+batch_size = 500
 epochs = 300
-lr = 0.0005
+lr = 0.0008
 
 class Mine(nn.Module):
     def __init__(self):
@@ -68,7 +68,8 @@ print(f'Tradeoff: {tradeoff}')
 policies.train_mine_policy(scenario, horizon, batch_size, epochs,
                       ntrvs, Mine, {'epochs' : 100},
                       q_net, pi_net, tradeoff,
-                      lr, f'{scenario.name}_lr_{lr}_tradeoff_{tradeoff}')
+                      lr, f'{scenario.name}_lr_{lr}_tradeoff_{tradeoff}',
+                      save_every=25)
 
 #policy = policies.MINEPolicy3(scenario, horizon, 500, ntrvs, Mine, 100, q_net, pi_net, tradeoff)
 #policy.train(nsamples=500, training_iterations=300, qlr=0.001, pilr=0.0001, tensorboard=True)
