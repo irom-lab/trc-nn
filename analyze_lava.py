@@ -74,7 +74,7 @@ for i in range(len(test_covs)):
         total_costs = costs.sum(axis=0).detach().numpy()
 
         print(f'Mean: {total_costs.mean()},\t Std: {total_costs.std()}')
-        axs[i].hist(total_costs, bins=30, edgecolor='black',  range=(20, 200), label=f'beta = {filename.split("_")[5]}')
+        axs[i].hist(total_costs, bins=30, edgecolor='black',  range=(20, 200), label=f'$\\beta$ = {filename.split("_")[5]}')
         axs[i].set_title(f'Sensor Cov: {test_cov}')
         axs[i].set_xlabel('Costs')
 
