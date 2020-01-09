@@ -54,8 +54,8 @@ def make_q_sequence(t: int):
 
 
 fig, axs = plt.subplots(1, 4, sharey=True, tight_layout=True)
-filenames = ['models/Lava_lr_0.0008_tradeoff_100_epoch_299',
-             'models/Lava_lr_0.0008_tradeoff_0_epoch_299']
+filenames = ['models/Lava_NC_lr_0.0008_tradeoff_100_epoch_299',
+             'models/Lava_NC_lr_0.0008_tradeoff_0_epoch_299']
 
 for i in range(len(test_covs)):
     test_cov = test_covs[i]
@@ -77,6 +77,7 @@ for i in range(len(test_covs)):
         axs[i].hist(total_costs, bins=30, edgecolor='black',  range=(20, 200), label=f'$\\beta$ = {filename.split("_")[5]}')
         axs[i].set_title(f'Sensor Cov: {test_cov}')
         axs[i].set_xlabel('Costs')
+        axs[i].set_ylabel('Number of Trials')
 
 plt.legend()
 plt.show()
