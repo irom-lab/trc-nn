@@ -320,7 +320,7 @@ class BallScenario(Scenario):
 
     @property
     def name(self) -> str:
-        return 'Ball7'
+        return 'Ball19'
 
     @property
     def nstates(self):
