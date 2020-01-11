@@ -30,7 +30,6 @@ def make_preprocess_net():
         nn.Conv2d(3, 6, 4, stride=2),
         nn.ELU(),
         nn.Conv2d(6, 6, 4, stride=2),
-        # nn.ELU(), # Ani
 
         # nn.Conv2d(3, 6, 10, stride=2),
         # nn.ELU(),
@@ -46,7 +45,7 @@ test_net = make_preprocess_net()
 net_out_size = test_net(pt.rand((1, 3, 64, 64))).numel()
 print(net_out_size)
 
-ntrvs = 8 # Ani
+ntrvs = 8 
 horizon = scenario.horizon
 tradeoff = int(sys.argv[1])
 batch_size = 200
