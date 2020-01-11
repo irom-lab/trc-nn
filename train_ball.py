@@ -104,7 +104,8 @@ q_net = QNetShared(make_q_sequence, make_preprocess_net, reshape_to=scenario.ima
 # q_net.load_state_dict(loaded_models['q_net_state_dict'])
 
 # Ani: load pre-trained weights
-loaded_models = pt.load("models/Ball17_lr_0.005_tradeoff_-1_epoch_25")
+# loaded_models = pt.load("models/Ball17_lr_0.005_tradeoff_-1_epoch_25")
+loaded_models = pt.load("models/good_initialization")
 pi_net.load_state_dict(loaded_models['pi_net_state_dict'])
 q_net.load_state_dict(loaded_models['q_net_state_dict'])
 
