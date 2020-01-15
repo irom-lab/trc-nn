@@ -99,7 +99,7 @@ class QNetTV(QNet):
 
         self._module_list = nn.ModuleList([make_sequence(t) for t in range(horizon)])
 
-    def forward(self, output, prev_trv, t):
+    def forward(self, output, prev_trv, t, sample=None):
         if self._reshape_to is not None:
             preprocessed = self._preprocess_net(output.reshape(self._reshape_to)).flatten()
         else:
@@ -113,17 +113,12 @@ class QNetTV(QNet):
         logcov = out[outsize:]
         linear = pt.diag((pt.exp(logcov) + 1e-3).sqrt())
 
-        ret = mean + linear.matmul(MultivariateNormal(pt.zeros(outsize), pt.eye(outsize)).sample().to(device=mean.device))
+        if sample is None:
+            sample = MultivariateNormal(pt.zeros(outsize), pt.eye(outsize)).sample().to(device=mean.device)
 
-        if np.isinf(ret.detach().cpu().numpy()).any():
-            print('Yikes')
-            print(output)
-            print(t)
-            print(prev_trv)
-            print(out)
-            raise RuntimeError()
+        ret = mean + linear.matmul(sample)
 
-        return ret
+        return ret, sample
 
     def log_prob(self, trv, output, prev_trv, t):
         if self._reshape_to is not None:
@@ -145,8 +140,8 @@ class QNetShared(QNetTV):
     def __init__(self, make_sequence, make_preprocess_net=None, reshape_to=None):
         super().__init__(make_sequence, 1, make_preprocess_net, reshape_to)
 
-    def forward(self, output, prev_trv, t):
-        return super().forward(output, prev_trv, 0)
+    def forward(self, output, prev_trv, t, sample=None):
+        return super().forward(output, prev_trv, 0, sample)
 
     def log_prob(self, trv, output, prev_trv, t):
         return super().log_prob(trv, output, prev_trv, 0)

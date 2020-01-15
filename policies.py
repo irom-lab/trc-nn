@@ -22,6 +22,8 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
                       log_video_every: Union[int, None]=None,
                       minibatch_size=0,
                       opt_iters=1,
+                      lowest_mi=np.inf,
+                      cutoff=np.inf,
                       device=pt.device('cpu')):
 
 
@@ -34,6 +36,9 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
 
     scenario.device = pt.device('cpu')
 
+    prev_best_value = np.inf
+    current_value = np.inf
+
     if minibatch_size == 0:
         minibatch_size = batch_size
 
@@ -42,11 +47,7 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
         writer = SummaryWriter(f'runs/{tag}', flush_secs=1)
 
     for epoch in range(epochs):
-        if epoch % save_every == 0 or epoch == epochs - 1:
-            print('Saving Model...')
-            pt.save({'pi_net_state_dict' : pi_net.state_dict(),
-                     'q_net_state_dict' : q_net.state_dict()}, f'models/{tag}_epoch_{epoch}')
-
+        #if epoch % save_every == 0 or epoch == epochs - 1:
         start_epoch_event = pt.cuda.Event(enable_timing=True)
         end_epoch_event = pt.cuda.Event(enable_timing=True)
         end_rollout_event = pt.cuda.Event(enable_timing=True)
@@ -59,7 +60,7 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
         q_net.cpu()
         pi_net.cpu()
 
-        states, outputs, trvs, inputs, costs = rollout(pi_net, q_net, ntrvs, scenario, horizon, batch_size, pt.device('cpu'))
+        states, outputs, samples, trvs, inputs, costs = rollout(pi_net, q_net, ntrvs, scenario, horizon, batch_size, pt.device('cpu'))
         end_rollout_event.record()
         pt.cuda.synchronize()
         elapsed_rollout_time = start_epoch_event.elapsed_time(end_rollout_event) / 1000
@@ -69,12 +70,20 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
 
         states = states.to(device)
         outputs = outputs.to(device)
+        samples = samples.to(device)
         trvs = trvs.to(device)
         inputs = inputs.to(device)
         costs = costs.to(device)
 
         q_net.to(device)
         pi_net.to(device)
+
+        for s in range(batch_size):
+            trv = pt.zeros(ntrvs, device=device)
+
+            for t in range(horizon):
+                trvs[:, t, s] = q_net(outputs[:, t, s], trv, t, samples[:, t, s])[0]
+                trv = trvs[:, t, s]
 
         value = costs.sum(axis=0).mean().item()
 
@@ -84,7 +93,10 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
 
             for t in range(horizon):
                 mine[t].cuda()
-                train_mine_network(mine[t], (states_mi[:, t, :], trvs_mi[:, t, :]), epochs=mine_params['epochs'])
+                if epoch == 0:
+                    values = train_mine_network(mine[t], (states_mi[:, t, :], trvs_mi[:, t, :]), epochs=100*mine_params['epochs'])
+                else:
+                    train_mine_network(mine[t], (states_mi[:, t, :], trvs_mi[:, t, :]), epochs=mine_params['epochs'])
 
             for t in range(horizon):
                 num_datapts = states.shape[2]
@@ -97,7 +109,6 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
                 joint_batch = pt.cat((states[:, t, joint_batch_idx], trvs[:, t, joint_batch_idx]), axis=0).t()
                 marginal_batch = pt.cat((states[:, t, marginal_batch_idx1], trvs[:, t, marginal_batch_idx2]), axis=0).t()
 
-                mine[t].cpu()
                 j_T = mine[t](joint_batch)
                 m_T = mine[t](marginal_batch)
 
@@ -105,6 +116,16 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
 
         mi_sum = mi.sum()
         baseline = costs.sum(axis=0).mean()
+
+        current_value = value + tradeoff * mi_sum.detach()
+
+        if value < cutoff and mi_sum < lowest_mi:
+            print('Saving Model...')
+            lowest_mi = mi_sum.item()
+            pt.save({'pi_net_state_dict' : pi_net.state_dict(),
+                     'q_net_state_dict' : q_net.state_dict()}, f'models/{tag}_epoch_{epoch}_mi_{lowest_mi:.3f}')
+        else:
+            print(f'Current Best: {prev_best_value}')
 
         for iter in range(opt_iters):
             print(f'Computing Iteration {iter}')
@@ -158,15 +179,16 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
         pt.cuda.synchronize()
         elapsed_epoch_time = start_epoch_event.elapsed_time(end_epoch_event) / 1000
 
-        print(f'[{epoch}: {elapsed_epoch_time:.3f}]\t\tAvg. Cost: {value:.3f}\t\tEst. MI: {mi_sum.item():.5f}\t\tTotal: {value + tradeoff * mi_sum.item():.3f}')
+        print(f'[{tradeoff}.{epoch}: {elapsed_epoch_time:.3f}]\t\tAvg. Cost: {value:.3f}\t\tEst. MI: {mi_sum.item():.5f}\t\tTotal: {value + tradeoff * mi_sum.item():.3f}\t\t Lowest MI: {lowest_mi:.3f}')
 
         if epoch == epochs - 1:
-            return states, outputs, trvs, inputs, costs
+            return lowest_mi
 
 
 def rollout(pi_net, q_net, ntrvs, scenario, horizon, batch_size, device=pt.device('cpu')):
     states = []
     outputs = []
+    samples = []
     trvs = []
     inputs = []
     costs = []
@@ -174,6 +196,7 @@ def rollout(pi_net, q_net, ntrvs, scenario, horizon, batch_size, device=pt.devic
     for s in range(batch_size):
         traj_states = [scenario.sample_initial_dist().reshape((-1, 1))]
         traj_outputs = []
+        traj_samples = []
         traj_trvs = []
         traj_inputs = []
         traj_costs = []
@@ -184,8 +207,9 @@ def rollout(pi_net, q_net, ntrvs, scenario, horizon, batch_size, device=pt.devic
             traj_outputs.append(scenario.sensor(traj_states[t].flatten(), t).reshape((-1, 1)))
 
             traj_outputs[t].requires_grad_(True)
-            trv = q_net(traj_outputs[t].flatten(), trv.flatten(), t).reshape((-1, 1))
-            traj_trvs.append(trv)
+            trv, sample = q_net(traj_outputs[t].flatten(), trv.flatten(), t)
+            traj_trvs.append(trv.reshape((-1, 1)))
+            traj_samples.append(sample.reshape((-1, 1)))
 
             traj_inputs.append(pi_net(traj_trvs[t].flatten(), t).reshape((-1, 1)))
             traj_costs.append(scenario.cost(traj_states[t].flatten(), traj_inputs[t].flatten(), t).reshape((-1, 1)))
@@ -195,17 +219,19 @@ def rollout(pi_net, q_net, ntrvs, scenario, horizon, batch_size, device=pt.devic
 
         states.append(pt.cat(traj_states, axis=1))
         outputs.append(pt.cat(traj_outputs, axis=1))
+        samples.append(pt.cat(traj_samples, axis=1))
         trvs.append(pt.cat(traj_trvs, axis=1))
         inputs.append(pt.cat(traj_inputs, axis=1))
         costs.append(pt.cat(traj_costs, axis=1))
 
 
-    states = pt.stack(states, axis=2)
-    outputs = pt.stack(outputs, axis=2)
-    trvs = pt.stack(trvs, axis=2)
-    inputs = pt.stack(inputs, axis=2)
+    states = pt.stack(states, axis=2).detach()
+    outputs = pt.stack(outputs, axis=2).detach()
+    samples = pt.stack(samples, axis=2).detach()
+    trvs = pt.stack(trvs, axis=2).detach()
+    inputs = pt.stack(inputs, axis=2).detach()
     costs = pt.stack(costs, axis=2)[0, :, :].detach()
 
 
 
-    return states, outputs, trvs, inputs, costs
+    return states, outputs, samples, trvs, inputs, costs

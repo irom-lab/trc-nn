@@ -45,22 +45,22 @@ test_net = make_preprocess_net()
 net_out_size = test_net(pt.rand((1, 3, 64, 64))).numel()
 print(net_out_size)
 
-ntrvs = 8 
+ntrvs = 8
 horizon = scenario.horizon
-tradeoff = int(sys.argv[1])
+#tradeoff = float(sys.argv[1])
 batch_size = 200
-epochs = 5000
+epochs = 100
 lr = 0.001 # 0.001
 
 class Mine(nn.Module):
     def __init__(self):
         super().__init__()
         self._net = nn.Sequential(
-            nn.Linear(scenario.nstates + ntrvs, 512),
+            nn.Linear(scenario.nstates + ntrvs, 64),
             nn.ELU(),
-            nn.Linear(512, 512),
+            nn.Linear(64, 64),
             nn.ELU(),
-            nn.Linear(512, 1)
+            nn.Linear(64, 1)
         )
 
     def forward(self, x):
@@ -109,15 +109,16 @@ loaded_models = pt.load("models/good_initialization")
 pi_net.load_state_dict(loaded_models['pi_net_state_dict'])
 q_net.load_state_dict(loaded_models['q_net_state_dict'])
 
+lowest_mi = 7.609
 
-print(q_net(scenario.sensor(scenario.sample_initial_dist(), 0), pt.zeros(ntrvs), 0))
-print(f'Tradeoff: {tradeoff}')
-
-policies.train_mine_policy(scenario, horizon, batch_size, epochs,
-                      ntrvs, Mine, {'epochs' : 100},
-                      q_net, pi_net, tradeoff,
-                      lr, f'{scenario.name}_lr_{lr}_tradeoff_{tradeoff}',
-                      save_every=25,
-                      minibatch_size=100, #, 20,
-                      opt_iters=1, # 10,
-                      device=pt.device('cuda'))
+for tradeoff in range(18, 42, 2):
+    lowest_mi = policies.train_mine_policy(scenario, horizon, batch_size, epochs,
+                          ntrvs, Mine, {'epochs' : 100},
+                          q_net, pi_net, tradeoff,
+                          lr, f'{scenario.name}_tradeoff_{tradeoff}',
+                          save_every=25,
+                          minibatch_size=200,
+                          opt_iters=1,
+                          cutoff=23.5,
+                          lowest_mi=lowest_mi,
+                          device=pt.device('cuda'))

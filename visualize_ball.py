@@ -7,14 +7,17 @@ import numpy as np
 import cv2
 
 scenario = BallScenario(ball_radius=0.235, # baseball
-                        robot_init_range=(-1, 1),
-                        ball_x_vel_range=(-5, -3),
-                        ball_init_x=8,
-                        ball_y_vel=7.85,
-                        ball_init_y=1,
-                        camera_height=1,
-                        camera_angle=np.pi/6,
-                        mode=pb.DIRECT, dt=1.0/15.0)
+                                robot_init_range=(-2.0, 2.0), # (-1, 1),
+                                ball_x_vel_range=(-4.5, -4.5), # (-5, -3),
+                                ball_init_x=8,
+                                ball_y_vel=7.85,
+                                ball_init_y=1,
+                                camera_height=1,
+                                camera_angle=np.pi/6,
+                                mode=pb.GUI,
+                                dt=1.0/15.0,
+                                brick_texture='brick2.jpg',
+                                ball_color=(0, 1, 0))
 
 state = scenario.sample_initial_dist().reshape((-1, 1))
 
@@ -35,5 +38,6 @@ for t in range(100):
         states = pt.cat(states, axis=1)
         print(states[1, :])
         break
+
 
 writer.release()
