@@ -4,6 +4,7 @@ import torch.nn.functional as fn
 import torch.optim as optim
 import numpy as np
 import copy
+import IPython as ipy
 
 from typing import List, Tuple, Union
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -57,8 +58,12 @@ def train_mine_network(mine, data: pt.Tensor, batch_size: int=None, epochs: int=
 
                   loss = -(mean_T - (1 / moving_avg_eT) * eT)
                   value = float(mean_T - pt.log(eT))
+
+                  if np.isnan(loss.cpu().detach().numpy()) or np.isnan(value):
+                      ipy.embed()
               else:
-                  loss = -(j_T.mean() - pt.log(pt.mean(pt.exp(m_T))))
+                  #loss = -(j_T.mean() - pt.log(pt.mean(pt.exp(m_T))))
+                  loss = -(j_T.mean() - pt.logsumexp(m_T.flatten(), 0) + np.log(batch_size))
                   value = -loss.item()
 
               values[epoch] = value

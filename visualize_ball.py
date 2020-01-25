@@ -17,7 +17,8 @@ scenario = BallScenario(ball_radius=0.235, # baseball
                                 mode=pb.GUI,
                                 dt=1.0/15.0,
                                 brick_texture='brick2.jpg',
-                                ball_color=(0, 1, 0))
+                                ball_color=(0, 1, 0),
+                                thirdperson=True)
 
 state = scenario.sample_initial_dist().reshape((-1, 1))
 
@@ -31,6 +32,12 @@ for t in range(100):
     writer.write(cv2.cvtColor(np.uint8(frame * 255), cv2.COLOR_RGB2BGR))
     states.append(state)
 
+    debug_camera_params = pb.getDebugVisualizerCamera()
+
+    image = pb.getCameraImage(debug_camera_params[0], debug_camera_params[1], debug_camera_params[2], debug_camera_params[3])
+    print(image[2])
+    cv2.imwrite(f'ball_imgs/{t}.png', cv2.cvtColor(np.uint8(image[2]), cv2.COLOR_RGB2BGR))
+
     if t == 20:
         cv2.imwrite('sample_image.png', cv2.cvtColor(np.uint8(frame * 255), cv2.COLOR_RGB2BGR))
 
@@ -38,6 +45,8 @@ for t in range(100):
         states = pt.cat(states, axis=1)
         print(states[1, :])
         break
+
+    time.sleep(1)
 
 
 writer.release()

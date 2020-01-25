@@ -5,6 +5,11 @@ import pybullet_data
 import cv2
 import imutils
 
+from panda_env import pandaEnv
+import pybullet as pb
+from utils_3d import *
+from utils_depth import *
+
 from abc import ABC, abstractmethod
 
 class Scenario(ABC):
@@ -111,7 +116,7 @@ class LQRScenario(Scenario):
         super().__init__()
 
     def sample_initial_dist(self):
-        return self._sample_initial_dist()
+        return pt.tensor([self._sample_initial_dist(), 0])
 
     def dynamics(self, state: np.ndarray, input: np.ndarray, t: int) -> np.ndarray:
         updated_state = pt.tensor([state[0] + state[1], state[1] + input])
@@ -210,7 +215,7 @@ class BallScenario(Scenario):
     def __init__(self, robot_init_range: float,
                  ball_init_x: float, ball_init_y: float, ball_x_vel_range: float,
                  ball_y_vel: float, ball_radius: float, camera_height: float,
-                 camera_angle: float, dt: float=(1/30.0), brick_texture='brick2.jpg', ball_color=(0, 1, 0), mode=pb.DIRECT):
+                 camera_angle: float, dt: float=(1/30.0), brick_texture='brick2.jpg', ball_color=(0, 1, 0), mode=pb.DIRECT, thirdperson=False):
         self._robot_init_range = robot_init_range
         self._ball_init_x = ball_init_x
         self._ball_x_vel_range = ball_x_vel_range
@@ -222,6 +227,7 @@ class BallScenario(Scenario):
         self._dt = dt
         self._gravity = 9.8
         self.device = pt.device('cpu')
+        self._thirdperson = thirdperson
 
         pb.connect(mode)
         pb.setGravity(0, 0, 0)
@@ -231,6 +237,11 @@ class BallScenario(Scenario):
         self._back_id = pb.loadURDF('plane.urdf', globalScaling=4)
         self._floor_id = pb.loadURDF('plane.urdf')
         pb.changeVisualShape(self._back_id, -1, textureUniqueId=self._text_id)
+
+        if thirdperson:
+            self._husky_id = pb.loadURDF('/home/vince/Code/bullet3/data/husky/husky.urdf', globalScaling=1.5)
+        #    self._side_id = pb.loadURDF('plane.urdf', globalScaling=4)
+        #    pb.changeVisualShape(self._side_id, -1, textureUniqueId=self._text_id)
 
         self._ball_vis_id = pb.createVisualShape(shapeType=pb.GEOM_SPHERE,
                                                  radius=self._ball_radius,
@@ -280,21 +291,10 @@ class BallScenario(Scenario):
         pb.resetBasePositionAndOrientation(self._back_id, [10 - state[0], 0, self._camera_height + 40],
                                            pb.getQuaternionFromEuler([0, -np.pi / 2, 0]))
 
-        view_mat = pb.computeViewMatrix([0, 0, self._camera_height], [np.cos(self._camera_angle), 0, np.sin(self._camera_angle) + self._camera_height], [0, 0, 1])
-        proj_mat = pb.computeProjectionMatrixFOV(90, 1, 0.1, 20)
-        image = pb.getCameraImage(64, 64, view_mat, proj_mat)[2][:, :, :-1] / 255.0
-        permuted_image = image.transpose([2, 0, 1]).reshape(1, 3, 64, 64)
+        if self._thirdperson:
+           pb.resetBasePositionAndOrientation(self._husky_id, [0, 0, -self._camera_height],
+                                              pb.getQuaternionFromEuler([0, 0, 0]))
 
-        return pt.from_numpy(permuted_image).float().flatten()
-
-    def sideview(self, state, t):
-        po = pb.getBasePositionAndOrientation(self._ball_id)
-
-        pb.resetBasePositionAndOrientation(self._ball_id, [state[1] - state[0], 0, state[2] - self._camera_height], [0, 0, 0, 1])
-        pb.resetBasePositionAndOrientation(self._floor_id, [0, 0, -self._camera_height],
-                                           pb.getQuaternionFromEuler([0, 0, 0]))
-        pb.resetBasePositionAndOrientation(self._back_id, [10 - state[0], 0, self._camera_height + 40],
-                                           pb.getQuaternionFromEuler([0, -np.pi / 2, 0]))
 
         view_mat = pb.computeViewMatrix([0, 0, self._camera_height], [np.cos(self._camera_angle), 0, np.sin(self._camera_angle) + self._camera_height], [0, 0, 1])
         proj_mat = pb.computeProjectionMatrixFOV(90, 1, 0.1, 20)
@@ -603,3 +603,115 @@ class SimpleCameraBallScenario(Scenario):
     @property
     def noutputs(self):
         return 1
+
+class GraspScenario(Scenario):
+    def __init__(self, mode=p.DIRECT):
+        self._mode = mode
+        self._env = pandaEnv(objPath='urdfs/mug/022_mug.urdf')
+
+    def sample_initial_dist(self, physicsClientId=0, force_state=None):
+        # state = np.array([0.5,
+        #                   0.0,
+        #                   0.0, 0.0])
+
+        if force_state is None:
+            state = np.array([np.random.uniform(0.45, 0.55),
+                              np.random.uniform(-0.05, 0.05),
+                              0.0,
+                              np.random.uniform(-np.pi / 4, np.pi / 4)])
+        else:
+            state = force_state.detach().numpy()
+        objPos = state[:3]
+        objYaw = state[-1]
+
+        self._env.reset_env(physicsClientId=physicsClientId)
+
+        pb.resetDebugVisualizerCamera(0.8, 180, -60, [0.5, 0, 0], physicsClientId=physicsClientId)
+        pb.resetBasePositionAndOrientation(self._env._blockId, posObj=objPos, ornObj=p.getQuaternionFromEuler([0, 0, objYaw]), physicsClientId=physicsClientId)
+
+        return pt.from_numpy(state).float()
+
+    def dynamics(self, state: np.ndarray, input: np.ndarray, t: int, physicsClientId=0) -> np.ndarray:
+        numpy_state = state.cpu().numpy()
+        numpy_input = 0.1 * input.cpu().numpy() + np.array([0.5, 0, 0.06, np.pi / 6])
+
+        objPos = numpy_state[:3]
+        objYaw = numpy_state[-1]
+
+        graspPos = numpy_input[:3]
+        graspYaw = numpy_input[-1]
+
+        objOrn = np.array([0,0,objYaw])
+
+        graspPos += np.array([0, 0 , 0.1]) # offset
+        graspOrn = np.array([-1, 0, 0, 0])
+        graspOrn = quatMult(graspOrn, np.array([0,0,np.sin(graspYaw)/2, np.cos(graspYaw)/2]))
+
+        self._env.load_arm(physicsClientId=physicsClientId)
+        graspPosBefore = graspPos + [0,0,0.2]
+        self._env.reset_arm_joints_ik(graspPosBefore, graspOrn, physicsClientId=physicsClientId)
+        graspOrn = self._env._panda.getEE(physicsClientId=physicsClientId)[1]
+
+        if self._mode == pb.GUI:
+            time.sleep(1)
+
+        # Move to grasp location by steps
+        self._env.move(graspPos, graspOrn, maxJointVel=0.15, steps=1000, physicsClientId=physicsClientId)
+
+        if self._mode == pb.GUI:
+            time.sleep(1)
+
+        #print('Now: ', r._panda.getEE()[0])
+
+        # Grasp
+        self._env.grasp(maxFingerVel=0.05, steps=100, physicsClientId=physicsClientId)
+
+        if self._mode == pb.GUI:
+            time.sleep(1)
+
+        # Lift, use current pos and orn check if success
+        self._env.lift(height=0.3, maxJointVel=0.1, maxFingerVel=0.05, steps=500, physicsClientId=physicsClientId)
+
+        if self._mode == pb.GUI:
+            time.sleep(5)
+
+        pos, orn = pb.getBasePositionAndOrientation(self._env._blockId, physicsClientId=physicsClientId)
+        euler = pb.getEulerFromQuaternion(orn, physicsClientId=physicsClientId)
+
+        return pt.tensor([pos[0], pos[1], pos[2], euler[2]]).float()
+
+    def sensor(self, state: np.ndarray, t: int, physicsClientId=0) -> np.ndarray:
+        depths = self._env.getDepth(physicsClientId=physicsClientId)
+        depths -= depths.min()
+        depths /= depths.max()
+
+        return pt.from_numpy(depths.reshape(1, 1, 128, 128)).float()
+
+    def cost(self, state: np.ndarray, input: np.ndarray, t: int, physicsClientId=0) -> float:
+        return pt.tensor([0.0])
+
+    def terminal_cost(self, state: np.ndarray, physicsClientId=0) -> float:
+        if state[2] > 0.05:
+            return pt.tensor([0.0])
+        else:
+            return pt.tensor([1.0])
+
+    @property
+    def name(self) -> str:
+        return 'Grasp20'
+
+    @property
+    def image_shape(self):
+        return (1, 1, 128, 128)
+
+    @property
+    def nstates(self) -> int:
+        return 4
+
+    @property
+    def ninputs(self) -> int:
+        return 4
+
+    @property
+    def noutputs(self) -> int:
+        return 128 * 128
