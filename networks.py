@@ -22,7 +22,7 @@ def log_prob_mvn(x: pt.Tensor, mean: pt.Tensor, cov: pt.Tensor):
 
     return (pt.exp(-0.5 * pt.mm(center.t(), pt.mm(cov, center))) / pt.sqrt((2 * np.pi) ** k * pt.det(cov))).log()
 
-def train_mine_network(mine, data: pt.Tensor, batch_size: int=None, epochs: int=int(5e2), log: bool=False, lr: float=1e-3,
+def train_mine_network(mine, data: pt.Tensor, batch_size: int=None, epochs: int=int(5e2), log: bool=False, lr: float=5e-5,
                        unbiased: bool=True, ma_rate: float=0.01, tag=None):
           assert(data[0].shape[1] == data[1].shape[1])
 

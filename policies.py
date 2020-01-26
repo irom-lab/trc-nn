@@ -105,9 +105,9 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
                 mine[t].cuda()
                 if epoch == 0:
                     # GOOD: ma_rate=0.01, lr=1e-4
-                    mi_values = train_mine_network(mine[t], (states_mi[:, t, :], trvs_mi[:, t, :]), epochs=500*mine_params['epochs'], unbiased=False, lr=1e-4)
+                    mi_values = train_mine_network(mine[t], (states_mi[:, t, :], trvs_mi[:, t, :]), epochs=500*mine_params['epochs'], unbiased=False, lr=mine_params['lr'])
                 else:
-                    mi_values = train_mine_network(mine[t], (states_mi[:, t, :], trvs_mi[:, t, :]), epochs=100*mine_params['epochs'], unbiased=False, lr=1e-4)
+                    mi_values = train_mine_network(mine[t], (states_mi[:, t, :], trvs_mi[:, t, :]), epochs=100*mine_params['epochs'], unbiased=False, lr=mine_params['lr'])
 
                 for v in mi_values:
                     writer.add_scalar('Loss/MINE', v, mine_counter)

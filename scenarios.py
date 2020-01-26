@@ -682,8 +682,6 @@ class GraspScenario(Scenario):
 
     def sensor(self, state: np.ndarray, t: int, physicsClientId=0) -> np.ndarray:
         depths = self._env.getDepth(physicsClientId=physicsClientId)
-        depths -= depths.min()
-        depths /= depths.max()
 
         return pt.from_numpy(depths.reshape(1, 1, 128, 128)).float()
 
@@ -698,7 +696,7 @@ class GraspScenario(Scenario):
 
     @property
     def name(self) -> str:
-        return 'Grasp20'
+        return 'Grasp23'
 
     @property
     def image_shape(self):

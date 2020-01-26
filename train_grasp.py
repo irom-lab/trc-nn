@@ -33,9 +33,9 @@ print(net_out_size)
 
 ntrvs = 16
 horizon = 1
-batch_size = 400
+batch_size = 200
 epochs = 1000
-lr = 0.00001
+lr = 0.001
 tradeoffs = [10]
 
 class Mine(nn.Module):
@@ -83,7 +83,7 @@ for tradeoff in tradeoffs:
     pt.manual_seed(0)
 
     lowest_mi = policies.train_mine_policy(scenario, horizon, batch_size, epochs,
-                          ntrvs, Mine, {'epochs' : 1000, 'batch_size' : 100},
+    ntrvs, Mine, {'epochs' : 1000, 'batch_size' : batch_size, 'lr' : 5e-5},
                           q_net, pi_net, tradeoff,
                           lr, f'{scenario.name}_tradeoff_{tradeoff}',
                           save_every=25,
