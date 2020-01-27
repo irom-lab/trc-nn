@@ -28,6 +28,7 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
                       cutoff=np.inf,
                       multiprocess=False,
                       pybullet=False,
+                      smoothing=0,
                       device=pt.device('cpu')):
     q_net.to(device=device)
     pi_net.to(device=device)
@@ -41,6 +42,8 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
 
     prev_best_value = np.inf
     current_value = np.inf
+
+    smoothed_mi = 0
 
     if minibatch_size == 0:
         minibatch_size = batch_size
@@ -105,11 +108,14 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
                 mine[t].cuda()
                 if epoch == 0:
                     # GOOD: ma_rate=0.01, lr=1e-4
-                    mi_values = train_mine_network(mine[t], (states_mi[:, t, :], trvs_mi[:, t, :]), epochs=500*mine_params['epochs'], unbiased=False, lr=mine_params['lr'])
+                    mi_values = train_mine_network(mine[t], (states_mi[:, t, :], trvs_mi[:, t, :]), epochs=500*mine_params['epochs'], unbiased=False, lr=mine_params['lr'], batch_size=mine_params['batch_size'])
+                    smoothed_mi = mi_values[0]
                 else:
-                    mi_values = train_mine_network(mine[t], (states_mi[:, t, :], trvs_mi[:, t, :]), epochs=100*mine_params['epochs'], unbiased=False, lr=mine_params['lr'])
+                    mi_values = train_mine_network(mine[t], (states_mi[:, t, :], trvs_mi[:, t, :]), epochs=100*mine_params['epochs'], unbiased=False, lr=mine_params['lr'], batch_size=mine_params['batch_size'])
 
                 for v in mi_values:
+                    smoothed_mi = smoothed_mi * smoothing + (1 - smoothing) * v
+                    print(smoothed_mi)
                     writer.add_scalar('Loss/MINE', v, mine_counter)
                     mine_counter += 1
 
@@ -144,15 +150,15 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
 
         current_value = value + tradeoff * mi_sum.detach()
 
-        if value < cutoff and mi_sum < lowest_mi:
+        if value < cutoff and smoothed_mi < lowest_mi:
             print('Saving Model...')
-            lowest_mi = mi_sum.item()
+            lowest_mi = smoothed_mi
             pt.save({'pi_net_state_dict' : pi_net.state_dict(),
-                     'q_net_state_dict' : q_net.state_dict()}, f'models/{tag}_epoch_{epoch}_mi_{lowest_mi:.3f}')
+                     'q_net_state_dict' : q_net.state_dict()}, f'models/best/{tag}_epoch_{epoch}_mi_{smoothed_mi:.3f}')
         elif epoch % save_every == 0 or epoch == epochs - 1:
             print('Saving Model...')
             pt.save({'pi_net_state_dict' : pi_net.state_dict(),
-                     'q_net_state_dict' : q_net.state_dict()}, f'models/{tag}_epoch_{epoch}_mi_{lowest_mi:.3f}')
+                     'q_net_state_dict' : q_net.state_dict()}, f'models/{tag}_epoch_{epoch}_mi_{smoothed_mi:.3f}')
         else:
             print(f'Current Best: {prev_best_value}')
 
@@ -212,7 +218,7 @@ def train_mine_policy(scenario: Scenario, horizon: int, batch_size: int,
         pt.cuda.synchronize()
         elapsed_epoch_time = start_epoch_event.elapsed_time(end_epoch_event) / 1000
 
-        print(f'[{tradeoff}.{epoch}: {elapsed_epoch_time:.3f}]\t\tAvg. Cost: {value:.3f}\t\tEst. MI: {mi_sum.item():.5f}\t\tTotal: {value + tradeoff * mi_sum.item():.3f}\t\t Lowest MI: {lowest_mi:.3f}')
+        print(f'[{tradeoff}.{epoch}: {elapsed_epoch_time:.3f}]\t\tAvg. Cost: {value:.3f}\t\tEst. MI: {smoothed_mi:.5f}\t\tTotal: {value + tradeoff * mi_sum.item():.3f}\t\t Lowest MI: {lowest_mi:.3f}')
 
         if epoch == epochs - 1:
             return lowest_mi

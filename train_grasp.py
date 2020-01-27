@@ -34,9 +34,9 @@ print(net_out_size)
 ntrvs = 16
 horizon = 1
 batch_size = 200
-epochs = 1000
+epochs = 30
 lr = 0.001
-tradeoffs = [10]
+tradeoffs = [5, 10, 15, 20]
 
 class Mine(nn.Module):
     def __init__(self):
@@ -83,15 +83,16 @@ for tradeoff in tradeoffs:
     pt.manual_seed(0)
 
     lowest_mi = policies.train_mine_policy(scenario, horizon, batch_size, epochs,
-    ntrvs, Mine, {'epochs' : 1000, 'batch_size' : batch_size, 'lr' : 5e-5},
+    ntrvs, Mine, {'epochs' : 1000, 'batch_size' : 100, 'lr' : 5e-5},
                           q_net, pi_net, tradeoff,
                           lr, f'{scenario.name}_tradeoff_{tradeoff}',
-                          save_every=25,
+                          save_every=1,
                           minibatch_size=batch_size,
                           opt_iters=1,
-                          cutoff=0.2,
+                          cutoff=0.15,
                           lowest_mi=lowest_mi,
                           pybullet=True,
                           multiprocess=True,
                           log_video_every=None,
+                          smoothing=0.9,
                           device=pt.device('cuda'))
