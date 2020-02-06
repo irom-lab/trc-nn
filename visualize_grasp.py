@@ -8,6 +8,7 @@ import numpy as np
 import sys
 import pybullet as pb
 import ray
+import time
 import cv2
 
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -17,7 +18,7 @@ np.random.seed(0)
 pt.manual_seed(0)
 ray.init()
 
-scenario = scenarios.GraspScenario()
+scenario = scenarios.NoisyGraspScenario()
 
 def make_preprocess_net():
     return nn.Sequential(
@@ -73,7 +74,7 @@ def make_q_sequence(t: int):
 pi_net = PiNetShared(make_pi_sequence)
 q_net = QNetShared(make_q_sequence, make_preprocess_net, reshape_to=scenario.image_shape)
 #loaded_models = pt.load('models/Grasp4_tradeoff_-1_epoch_300_mi_0.000')
-loaded_models = pt.load('models/Grasp18_tradeoff_-1_epoch_25_mi_0.000')
+loaded_models = pt.load('models/init_grasp')
 pi_net.load_state_dict(loaded_models['pi_net_state_dict'])
 q_net.load_state_dict(loaded_models['q_net_state_dict'])
 
@@ -89,6 +90,8 @@ else:
     print('No failures')
     sys.exit()
 
+scenario._mode = pb.GUI
+
 state = states[:, 0, failures[0]].flatten()
 input = inputs[:, 0, failures[0]].flatten()
 
@@ -98,6 +101,7 @@ scenario.sample_initial_dist(force_state=state)
 img = scenario.sensor(state, 0).reshape((128, 128))
 final = scenario.dynamics(state, input, 0, id)
 cv2.imwrite('failure.png', cv2.cvtColor(np.uint8(255 * img), cv2.COLOR_GRAY2BGR))
+time.sleep(5)
 pb.disconnect()
 
 print(state)

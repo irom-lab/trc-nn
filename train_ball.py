@@ -15,15 +15,15 @@ np.random.seed(1)
 pt.manual_seed(1)
 
 scenario = scenarios.BallScenario(ball_radius=0.235, # baseball
-                                            robot_init_range=(-2.0, 2.0), # (-1, 1),
-                                            ball_x_vel_range=(-4.5, -4.5), # (-5, -3),
-                                            ball_init_x=8,
-                                            ball_y_vel=7.85,
-                                            ball_init_y=1,
-                                            camera_height=1,
-                                            camera_angle=np.pi/6,
-                                            mode=pb.DIRECT,
-                                            dt=1.0/15.0)
+                                    robot_init_range=(-2.0, 2.0), # (-1, 1),
+                                    ball_x_vel_range=(-4.5, -4.5), # (-5, -3),
+                                    ball_init_x=8,
+                                    ball_y_vel=7.85,
+                                    ball_init_y=1,
+                                    camera_height=1,
+                                    camera_angle=np.pi/6,
+                                    mode=pb.DIRECT,
+                                    dt=1.0/15.0)
 
 def make_preprocess_net():
     return nn.Sequential(
@@ -47,6 +47,7 @@ print(net_out_size)
 
 ntrvs = 8
 horizon = scenario.horizon
+print(horizon)
 #tradeoff = float(sys.argv[1])
 batch_size = 200
 epochs = 100

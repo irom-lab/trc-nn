@@ -32,7 +32,7 @@ print(net_out_size)
 
 ntrvs = 16
 horizon = 1
-batch_size = 400
+batch_size = 500
 tradeoffs = [10]
 
 class Mine(nn.Module):
@@ -69,12 +69,12 @@ def make_q_sequence(t: int):
 pi_net = PiNetShared(make_pi_sequence)
 q_net = QNetShared(make_q_sequence, make_preprocess_net, reshape_to=scenario.image_shape)
 
-filenames = ['init_grasp', 'Grasp3_tradeoff_10_epoch_28_mi_-0.074', 'Grasp3_tradeoff_10_epoch_62_mi_-17.163']
+filenames = ['init_grasp', 'best/Grasp23_tradeoff_20_epoch_28_mi_2.682']
 
 for name in filenames:
     np.random.seed(0)
     pt.manual_seed(0)
-    
+
     loaded_models = pt.load(f'models/{name}')
     pi_net.load_state_dict(loaded_models['pi_net_state_dict'])
     q_net.load_state_dict(loaded_models['q_net_state_dict'])

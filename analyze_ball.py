@@ -15,17 +15,15 @@ from policies import rollout
 from torch.distributions.multivariate_normal import MultivariateNormal
 from torch.distributions.uniform import Uniform
 
-brick_texture = 'brick2.jpg'
-noise=0.25
+brick_texture='brick_backgrounds/test7.jpg'
 
 print(brick_texture)
-print(noise)
 
 
 # tested for noise in [0.1, 0.3] successfully
 # and with BallScenario backgroudns 2-8
 
-scenario = scenarios.NoisyBallScenario(ball_radius=0.235, # baseball
+scenario = scenarios.BallScenario(ball_radius=0.235, # baseball
                                             robot_init_range=(-2.0, 2.0), # (-2, 2),
                                             ball_x_vel_range=(-4.5, -4.5), # (-4.5, -4.5),
                                             ball_init_x=8,
@@ -36,8 +34,7 @@ scenario = scenarios.NoisyBallScenario(ball_radius=0.235, # baseball
                                             mode=pb.DIRECT,
                                             dt=1.0/15.0,
                                             brick_texture=brick_texture,
-                                            ball_color=(0, 1, 0),
-                                            noise=noise)
+                                            ball_color=(0, 1, 0))
 
 def make_preprocess_net():
     return nn.Sequential(
@@ -51,7 +48,7 @@ net_out_size = test_net(pt.rand((1, 3, 64, 64))).numel()
 
 ntrvs = 8
 horizon = scenario.horizon
-batch_size = 1000
+batch_size = 500
 
 class Mine(nn.Module):
     def __init__(self):
@@ -84,7 +81,7 @@ def make_q_sequence(t: int):
 pi_net = PiNetShared(make_pi_sequence)
 q_net = QNetShared(make_q_sequence, make_preprocess_net, reshape_to=scenario.image_shape)
 
-filenames = [ 'models/Ball_tradeoff_20_epoch_1_mi_6.203', 'models/good_initialization']
+filenames = ['models/good_initialization', 'models/Ball_tradeoff_20_epoch_1_mi_6.203']
 
 fig, axs = plt.subplots(1, 1, sharey=True, tight_layout=True)
 
@@ -100,7 +97,8 @@ for f in filenames:
     states, outputs, samples, trvs, inputs, costs = rollout(pi_net, q_net, ntrvs, scenario, horizon, batch_size, pt.device('cpu'))
     total_costs = costs.sum(axis=0).detach().numpy()
 
-    print(f'Tradeoff: {f[:10]} Mean: {total_costs.mean()},\t Std: {total_costs.std()}')
+    print(f)
+    print(f'Tradeoff: {f[:10]} Mean: {total_costs.mean()},\t Std: {total_costs.std()},\t Mean Dist: {pt.abs(states[0, -1, :] - states[1, -1, :]).mean()}')
     axs.hist(total_costs, bins=30, edgecolor='black', alpha=0.5, label=f[:10])
 
     outputs = outputs.numpy()
